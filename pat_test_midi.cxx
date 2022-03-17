@@ -12,7 +12,10 @@ bool isPlaying = false;
 
 array<WaveFileData> wavData = {WaveFileData(), WaveFileData()};
 array<int> samples = {-1, -1};
+array<int> timestamps = {0, 0};
 int startNote = 48;
+
+array<double> prevBlock;
 
 bool initialize()
 {
@@ -32,6 +35,13 @@ bool initialize()
 
 void processBlock(BlockData& data)
 {
+  if(prevBlock.length != data.samplesToProcess) {
+    prevBlock.resize(data.samplesToProcess);
+    for(uint i = 0; i < prevBlock.length; i++) {
+      prevBlock[i] = 0;
+    }
+  }
+
   for(uint eventIndex = 0; eventIndex < data.inputMidiEvents.length; eventIndex++)
   {
     MidiEvent event = data.inputMidiEvents[eventIndex];
@@ -43,6 +53,7 @@ void processBlock(BlockData& data)
 
       print("Midi ON" + formatInt(note));
       samples[note - startNote] = 0;
+      timestamps[note - startNote] = int(event.timeStamp);
     }
     else if(eventType == kMidiNoteOff)
     {
@@ -50,27 +61,31 @@ void processBlock(BlockData& data)
 
       print("Midi OFF" + formatInt(note));
       samples[note - startNote] = -1;
-    }
-    else
-    {
-      print("Unknown Midi type");
+      timestamps[note - startNote] = int(event.timeStamp);
     }
   }
 
   for(uint sampleIndex = 0; sampleIndex < data.samplesToProcess; sampleIndex++)
   {
-    double sampleValue = 0;
+    data.samples[0][sampleIndex] += prevBlock[sampleIndex];
+    prevBlock[sampleIndex] = 0;
 
     for(uint i = 0; i < wavData.length; i++) {
       int sample = samples[i];
 
       if(sample >= 0 && uint(sample) < wavData[i].interleavedSamples.length) {
-        sampleValue += wavData[i].interleavedSamples[sample];
+        uint targetSample = uint(sampleIndex + timestamps[i]);
+        double sampleValue = wavData[i].interleavedSamples[sample];
+
+        if(targetSample < data.samplesToProcess) {
+          data.samples[0][targetSample] += sampleValue;
+        }
+        else {
+          uint prevTargetSample = targetSample - data.samplesToProcess;
+          prevBlock[prevTargetSample] += sampleValue;
+        }
         samples[i]++;
       }
     }
-
-    data.samples[0][sampleIndex] = sampleValue;
-    data.samples[1][sampleIndex] = sampleValue;
   }
 }
